@@ -1,0 +1,101 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root {
+  margin: 0;
+  min-height: 100%;
+  width: 100%;
+}
+
+body {
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #ffffff;
+  color: #0f172a;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@keyframes fadeIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+  45% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  75% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes fadeOutLanding {
+  0% { opacity: 1; }
+  60% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.fade-out-landing {
+  animation: fadeOutLanding 10000ms linear both;
+}
+
+/* Cinematic 10s staging (Landing headline/body -> Activation materialize) */
+@keyframes cinematicHeadlineIn {
+  0% { opacity: 0; filter: blur(5px); transform: scale(0.98); }
+  30% { opacity: 1; filter: blur(0px); transform: scale(1); }
+  100% { opacity: 1; filter: blur(0px); transform: scale(1); }
+}
+
+@keyframes cinematicBodyIn {
+  0% { opacity: 0; filter: blur(5px); transform: scale(0.98); }
+  30% { opacity: 0; filter: blur(5px); transform: scale(0.98); }
+  60% { opacity: 1; filter: blur(0px); transform: scale(1); }
+  100% { opacity: 1; filter: blur(0px); transform: scale(1); }
+}
+
+@keyframes cinematicLateIn {
+  0% { opacity: 0; filter: blur(5px); transform: scale(0.98); }
+  60% { opacity: 0; filter: blur(5px); transform: scale(0.98); }
+  100% { opacity: 1; filter: blur(0px); transform: scale(1); }
+}
+
+.cinematic-headline {
+  animation: cinematicHeadlineIn 10s linear both;
+}
+
+.cinematic-body {
+  animation: cinematicBodyIn 10s linear both;
+}
+
+.cinematic-late {
+  animation: cinematicLateIn 10s linear both;
+}
+
+/* Embedded Activation: 10s reading pause (opacity 0), then 2s fade in (opacity 1) */
+@keyframes activationFormDelayIn {
+  0% {
+    opacity: 0;
+    filter: blur(5px);
+    transform: scale(0.98);
+  }
+  83.333% {
+    opacity: 0;
+    filter: blur(5px);
+    transform: scale(0.98);
+  }
+  100% {
+    opacity: 1;
+    filter: blur(0px);
+    transform: scale(1);
+  }
+}
+
+.activation-form-delay-in {
+  animation: activationFormDelayIn 12s linear both;
+}

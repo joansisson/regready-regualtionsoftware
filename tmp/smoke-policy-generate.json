@@ -1,0 +1,6 @@
+{
+  "title": "Smoke Test Policy",
+  "type": "general",
+  "description": "Test policy generation via Local Pro",
+  "frameworks": ["gdpr"]
+}

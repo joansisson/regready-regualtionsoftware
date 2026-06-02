@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "RegReady Local Pro",
+  "version": "1.0.0",
+  "action": {
+    "default_popup": "client/index.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://localhost:5000/*"],
+      "js": ["dist/assets/contentScript.bundle.js"]
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "src/assets/styles.css",
+        "src/assets/locales/en/translation.json"
+      ],
+      "matches": ["http://localhost:5000/*"]
+    }
+  ],
+  "permissions": ["storage"]
+}

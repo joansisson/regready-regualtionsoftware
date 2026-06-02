@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "RegReady Local Pro",
+  "version": "1.0.0",
+  "description": "Local-first compliance workspace integration.",
+  "permissions": ["storage", "activeTab"],
+  "action": {
+    "default_popup": "client/index.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://localhost:5000/*"],
+      "js": ["contentScript.js"]
+    }
+  ]
+}

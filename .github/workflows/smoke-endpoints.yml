@@ -1,0 +1,52 @@
+name: Smoke - Endpoints
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+
+jobs:
+  smoke-endpoints:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prepare DB schema
+        run: npm run db:push
+
+      - name: Build server
+        run: npm run build:server
+
+      - name: Start server (background)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $proc = Start-Process -FilePath "node" -ArgumentList "dist/index.js" -WorkingDirectory (Get-Location) -NoNewWindow -PassThru
+          Write-Host "Server PID: $($proc.Id)"
+          # Wait until server responds (any status code is fine)
+          $maxTries = 30
+          for ($i=0; $i -lt $maxTries; $i++) {
+            try {
+              $r = Invoke-WebRequest -Uri "http://localhost:5000/api/auth/user" -Method GET -TimeoutSec 2 -UseBasicParsing -ErrorAction Stop
+              break
+            } catch {
+              # Expected: 401 (unauth) or connection refused during startup
+              Start-Sleep -Milliseconds 500
+            }
+          }
+
+          # Run smoke suite
+          powershell -ExecutionPolicy Bypass -File .\smoke_endpoints.ps1
+
+          # Stop server
+          Stop-Process -Id $proc.Id -Force
