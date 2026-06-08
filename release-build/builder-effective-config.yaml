@@ -8,6 +8,7 @@ files:
       - dist/**/*
       - dist/preload.cjs
       - dist/preload.js
+      - dist/public/**/*
       - package.json
       - preload.cjs
       - migrations/**/*

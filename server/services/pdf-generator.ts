@@ -1,18 +1,48 @@
 import PDFDocument from 'pdfkit';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import type { Policy, AuditReport } from '@shared/schema';
+
+/**
+ * Returns a writable directory for generated PDFs.
+ * 
+ * In packaged (Electron) mode:
+ *   %APPDATA%/RegReady Local Pro/generated-pdfs/
+ * 
+ * In development mode:
+ *   <project_root>/generated-pdfs/
+ * 
+ * This avoids crashes when the app is packaged, because process.cwd()
+ * points to the read-only "resources" directory inside the ASAR archive.
+ */
+function getGeneratedPdfsDir(): string {
+  if (process.env.REGREADY_PDF_DIR) {
+    return process.env.REGREADY_PDF_DIR;
+  }
+
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+  const isPackagedFolder = moduleDir.includes('win-unpacked') || moduleDir.includes('app.asar');
+
+  if (isPackagedFolder) {
+    const appDataFolder = path.join(process.env.APPDATA || '', 'RegReady Local Pro');
+    const pdfDir = path.join(appDataFolder, 'generated-pdfs');
+    if (!fs.existsSync(pdfDir)) {
+      fs.mkdirSync(pdfDir, { recursive: true });
+    }
+    return pdfDir;
+  }
+
+  return path.join(process.cwd(), 'generated-pdfs');
+}
 
 export async function generatePolicyPDF(policy: Policy): Promise<string> {
   const doc = new PDFDocument();
   const filename = `policy-${policy.id}-${Date.now()}.pdf`;
-  const filepath = path.join(process.cwd(), 'generated-pdfs', filename);
+  const pdfDir = getGeneratedPdfsDir();
+  const filepath = path.join(pdfDir, filename);
 
-  // Ensure directory exists
-  const dir = path.dirname(filepath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
+  // Directory is created by getGeneratedPdfsDir() if needed
 
   const stream = fs.createWriteStream(filepath);
   doc.pipe(stream);
@@ -81,10 +111,8 @@ export async function generateComplianceReportPDF(params: {
 }): Promise<string> {
   const doc = new PDFDocument();
   const filename = `compliance-report-${params.templateId}-${Date.now()}.pdf`;
-  const filepath = path.join(process.cwd(), "generated-pdfs", filename);
-
-  const dir = path.dirname(filepath);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  const pdfDir = getGeneratedPdfsDir();
+  const filepath = path.join(pdfDir, filename);
 
   const stream = fs.createWriteStream(filepath);
   doc.pipe(stream);
@@ -184,13 +212,8 @@ export async function generateRiskAssessmentPDF(params: {
 }): Promise<string> {
   const doc = new PDFDocument();
   const filename = `risk-assessment-${Date.now()}.pdf`;
-  const filepath = path.join(process.cwd(), "generated-pdfs", filename);
-
-  // Ensure directory exists
-  const dir = path.dirname(filepath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
+  const pdfDir = getGeneratedPdfsDir();
+  const filepath = path.join(pdfDir, filename);
 
   const stream = fs.createWriteStream(filepath);
   doc.pipe(stream);
@@ -266,13 +289,8 @@ export async function generateRiskAssessmentPDF(params: {
 export async function generateAuditReportPDF(report: AuditReport): Promise<string> {
   const doc = new PDFDocument();
   const filename = `audit-report-${report.id}-${Date.now()}.pdf`;
-  const filepath = path.join(process.cwd(), 'generated-pdfs', filename);
-
-  // Ensure directory exists
-  const dir = path.dirname(filepath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
+  const pdfDir = getGeneratedPdfsDir();
+  const filepath = path.join(pdfDir, filename);
 
   const stream = fs.createWriteStream(filepath);
   doc.pipe(stream);

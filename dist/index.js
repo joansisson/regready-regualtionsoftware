@@ -69,6 +69,20 @@ var init_schema = __esm({
       createdAt: text("created_at").default("CURRENT_TIMESTAMP").notNull(),
       updatedAt: text("updated_at").default("CURRENT_TIMESTAMP").notNull()
     });
+    // ==========================================
+    // PDF GENERATION PATH SETUP
+    // ==========================================
+    const path = require('path');
+    const fs = require('fs');
+
+    // Create the absolute path pointing to your 'generated-pdfs' folder
+    const pdfOutputDir = path.join(process.cwd(), 'generated-pdfs');
+
+    // Automatically build the folder if it isn't there so the app doesn't crash
+    if (!fs.existsSync(pdfOutputDir)) {
+      fs.mkdirSync(pdfOutputDir, { recursive: true });
+    }
+    // ==========================================
     appSecrets = sqliteTable("app_secrets", {
       key: text("key").primaryKey(),
       value: text("value").notNull(),
@@ -283,11 +297,13 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
 import path from "path";
 import fs from "fs";
+import { fileURLToPath } from "url";
 function getDatabasePath() {
   if (process.env.REGREADY_DB_PATH) {
     return process.env.REGREADY_DB_PATH;
   }
-  const isPackagedFolder = __dirname.includes("win-unpacked") || __dirname.includes("app.asar");
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+  const isPackagedFolder = moduleDir.includes("win-unpacked") || moduleDir.includes("app.asar");
   if (isPackagedFolder) {
     const appDataFolder = path.join(process.env.APPDATA || "", "RegReady Local Pro");
     if (!fs.existsSync(appDataFolder)) {
@@ -306,6 +322,63 @@ var init_db = __esm({
     sqlite = new Database(sqlitePath);
     db = drizzle(sqlite, { schema: schema_exports });
     console.log(`[RegReady Local Pro] Database initialized at: ${sqlitePath}`);
+  }
+});
+
+// server/middleware/errorHandler.ts
+import { ZodError } from "zod";
+var errorHandler, notFoundHandler;
+var init_errorHandler = __esm({
+  "server/middleware/errorHandler.ts"() {
+    "use strict";
+    errorHandler = (err, req, res, _next) => {
+      if (err instanceof ZodError) {
+        const errorResponse2 = {
+          error: "Validation failed",
+          code: "VALIDATION_ERROR",
+          timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+          path: req.url,
+          details: err.errors.map((e) => ({
+            field: e.path.join("."),
+            message: e.message,
+            code: e.code
+          }))
+        };
+        console.warn(`Validation error ${req.method} ${req.url}`, errorResponse2.details);
+        res.status(400).json(errorResponse2);
+        return;
+      }
+      const appErr = err;
+      console.error(`Error ${appErr?.statusCode || 500}: ${appErr?.message}`, {
+        method: req.method,
+        url: req.url,
+        userAgent: req.get("User-Agent"),
+        timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+        stack: appErr?.stack
+      });
+      const isDevelopment = process.env.NODE_ENV === "development";
+      const statusCode = appErr?.statusCode || 500;
+      const message = appErr?.isOperational ? appErr?.message : "Internal server error";
+      const errorResponse = {
+        error: message,
+        code: appErr?.code,
+        timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+        path: req.url
+      };
+      if (isDevelopment && appErr?.stack) {
+        errorResponse.stack = appErr.stack;
+      }
+      res.status(statusCode).json(errorResponse);
+    };
+    notFoundHandler = (req, res) => {
+      res.status(404).json({
+        error: "Resource not found",
+        code: "NOT_FOUND",
+        path: req.url,
+        method: req.method,
+        timestamp: (/* @__PURE__ */ new Date()).toISOString()
+      });
+    };
   }
 });
 
@@ -2393,6 +2466,8 @@ ${p.content || p.description || ""}`).join("\n\n") : "";
       }
     });
   }));
+  app2.use(notFoundHandler);
+  app2.use(errorHandler);
   const httpServer = createServer(app2);
   return httpServer;
 }
@@ -2405,6 +2480,7 @@ var init_routes = __esm({
     init_pdf_generator();
     init_byokCrypto();
     init_auth();
+    init_errorHandler();
     asyncHandler = (fn) => (req, res, next) => {
       Promise.resolve(fn(req, res, next)).catch(next);
     };
@@ -2619,6 +2695,7 @@ import compression from "compression";
 import path5 from "path";
 import fs4 from "fs";
 import os from "os";
+import { fileURLToPath as fileURLToPath2 } from "url";
 
 // server/services/appSecrets.ts
 init_db();
@@ -2657,56 +2734,8 @@ async function ensureAppSecrets() {
   }
 }
 
-// server/middleware/errorHandler.ts
-import { ZodError } from "zod";
-var errorHandler = (err, req, res, _next) => {
-  if (err instanceof ZodError) {
-    const errorResponse2 = {
-      error: "Validation failed",
-      code: "VALIDATION_ERROR",
-      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-      path: req.url,
-      details: err.errors.map((e) => ({
-        field: e.path.join("."),
-        message: e.message,
-        code: e.code
-      }))
-    };
-    console.warn(`Validation error ${req.method} ${req.url}`, errorResponse2.details);
-    res.status(400).json(errorResponse2);
-    return;
-  }
-  const appErr = err;
-  console.error(`Error ${appErr?.statusCode || 500}: ${appErr?.message}`, {
-    method: req.method,
-    url: req.url,
-    userAgent: req.get("User-Agent"),
-    timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-    stack: appErr?.stack
-  });
-  const isDevelopment = process.env.NODE_ENV === "development";
-  const statusCode = appErr?.statusCode || 500;
-  const message = appErr?.isOperational ? appErr?.message : "Internal server error";
-  const errorResponse = {
-    error: message,
-    code: appErr?.code,
-    timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-    path: req.url
-  };
-  if (isDevelopment && appErr?.stack) {
-    errorResponse.stack = appErr.stack;
-  }
-  res.status(statusCode).json(errorResponse);
-};
-var notFoundHandler = (req, res) => {
-  res.status(404).json({
-    error: "Resource not found",
-    code: "NOT_FOUND",
-    path: req.url,
-    method: req.method,
-    timestamp: (/* @__PURE__ */ new Date()).toISOString()
-  });
-};
+// server/index.ts
+init_errorHandler();
 
 // server/middleware/rateLimit.ts
 var store = /* @__PURE__ */ new Map();
@@ -3016,7 +3045,8 @@ var csrfProtection = (req, res, next) => {
 };
 var contentSecurityPolicy = (req, res, next) => {
   const isProd2 = process.env.NODE_ENV === "production";
-  const isElectronDesktop = process.env.ELECTRON_DESKTOP === "true";
+  const isElectronDesktop = process.env.ELECTRON_DESKTOP === "true" || // robust: works regardless of env vars
+    typeof process.versions?.electron === "string";
   const allowInlineForClient = !isProd2 || isElectronDesktop;
   const scriptSrc = allowInlineForClient ? "script-src 'self' 'unsafe-inline'" : "script-src 'self'";
   const styleSrc = allowInlineForClient ? "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com" : "style-src 'self' https://fonts.googleapis.com";
@@ -3062,7 +3092,7 @@ var requestSizeLimit = (maxSize = 10 * 1024 * 1024) => {
 };
 var sensitiveDataProtection = (req, res, next) => {
   const originalSend = res.send;
-  res.send = function(data) {
+  res.send = function (data) {
     if (typeof data === "string") {
       data = data.replace(/\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b/g, "[REDACTED-CC]");
       data = data.replace(/\b\d{3}-\d{2}-\d{4}\b/g, "[REDACTED-SSN]");
@@ -3083,7 +3113,11 @@ init_db();
 var app = express2();
 var APP_NAME = "RegReady Local Pro";
 var isProd = process.env.NODE_ENV === "production" || !fs4.existsSync(path5.join(process.cwd(), "src"));
-var baseDir = process.env.REGREADY_BASE_DIR ?? process.cwd();
+var appRootDefault = (() => {
+  const __dirname = path5.dirname(fileURLToPath2(import.meta.url));
+  return path5.resolve(__dirname, "..");
+})();
+var baseDir = process.env.REGREADY_BASE_DIR ?? (isProd ? appRootDefault : process.cwd());
 function log2(message) {
   const formattedTime = (/* @__PURE__ */ new Date()).toLocaleTimeString();
   console.log(`${formattedTime} [${APP_NAME}] ${message}`);
@@ -3206,13 +3240,30 @@ function scheduleGeneratedPdfCleanup() {
     scheduleGeneratedPdfCleanup();
     const { registerRoutes: registerRoutes2 } = await Promise.resolve().then(() => (init_routes(), routes_exports));
     const server = await registerRoutes2(app);
-    const staticCandidates = [
-      path5.join(baseDir, "dist", "public"),
-      path5.join(baseDir, "public"),
-      // express.static cannot serve from inside app.asar, so packaged Electron UI must be unpacked
-      path5.join(baseDir, "app.asar.unpacked", "dist", "public"),
-      path5.join(baseDir, "app.asar.unpacked", "public")
-    ];
+    const serverModulePath = fileURLToPath2(import.meta.url);
+    const inferredUnpackedAppRoot = (() => {
+      const asarSegment = "/app.asar/";
+      const unpackedSegment = "/app.asar.unpacked/";
+      if (!serverModulePath.includes(asarSegment)) return null;
+      const unpackedIndexPath = serverModulePath.replace(asarSegment, unpackedSegment);
+      return path5.resolve(path5.dirname(unpackedIndexPath), "..");
+    })();
+    const staticCandidates = (() => {
+      const unpackedCandidates = [];
+      const asarCandidates = [];
+      unpackedCandidates.push(
+        path5.join(baseDir, "app.asar.unpacked", "dist", "public"),
+        path5.join(baseDir, "app.asar.unpacked", "public")
+      );
+      if (inferredUnpackedAppRoot) {
+        unpackedCandidates.push(
+          path5.join(inferredUnpackedAppRoot, "dist", "public"),
+          path5.join(inferredUnpackedAppRoot, "public")
+        );
+      }
+      asarCandidates.push(path5.join(baseDir, "dist", "public"), path5.join(baseDir, "public"));
+      return [...unpackedCandidates, ...asarCandidates];
+    })();
     const staticDir = staticCandidates.find((dir) => fs4.existsSync(path5.join(dir, "index.html"))) || staticCandidates[0];
     const indexHtmlPath = path5.join(staticDir, "index.html");
     let canServeStatic = false;
@@ -3224,9 +3275,17 @@ function scheduleGeneratedPdfCleanup() {
     }
     if (canServeStatic) {
       log2(`Serving static client interface from: ${staticDir}`);
-      app.use(express2.static(staticDir));
-      app.get(/^(?!\/api).*/, (_req, res) => {
-        res.sendFile(indexHtmlPath);
+      app.use(express2.static(staticDir, {
+        maxAge: isProd ? "1y" : "0",
+        etag: false
+      }));
+      app.get("*", (req, res, next) => {
+        if (req.path.startsWith("/api")) return next();
+        if (req.method !== "GET") return next();
+        if (path5.extname(req.path)) return next();
+        const acceptsHtml = req.accepts("html");
+        if (acceptsHtml !== "html") return next();
+        return res.sendFile(indexHtmlPath);
       });
     } else {
       if (isProd) {

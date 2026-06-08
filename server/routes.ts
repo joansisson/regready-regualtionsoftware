@@ -12,8 +12,11 @@ import {
   type LLMProvider,
 } from "./services/llmService";
 import { generatePolicyPDF, generateRiskAssessmentPDF, generateComplianceReportPDF } from "./services/pdf-generator";
-import { decryptByokKey } from "./services/byokCrypto";
+import { encryptByokKey, decryptByokKey } from "./services/byokCrypto";
 import { requireAuth, type AuthenticatedRequest } from "./middleware/auth";
+import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
+import { createStorage } from "./storage";
+import { insertPolicySchema } from "@shared/schema";
 
 const asyncHandler = (fn: Function) => (req: Request, res: Response, next: any) => {
   Promise.resolve(fn(req, res, next)).catch(next);
@@ -146,6 +149,11 @@ function looksLikeBcryptHash(value: string | null | undefined): boolean {
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Ensure the database storage is initialized before any route handlers run.
+  // This seeds default frameworks, vendors, etc. and must complete before
+  // the first request arrives to avoid race conditions.
+  await createStorage();
+
   // Exchange activation credentials for a JWT that the rest of /api can use.
   app.post(
     "/api/auth/login",
@@ -484,11 +492,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     "/api/policies",
     requireAuth,
     asyncHandler(async (req: any, res: Response) => {
-      const policy = await storage.createPolicy({
+      // Validate input via the drizzle-zod schema before passing to storage
+      const parsed = insertPolicySchema.parse({
         ...req.body,
         createdBy: String(req.user.id),
         organizationId: req.user.organizationId,
-      } as any);
+      });
+      const policy = await storage.createPolicy(parsed);
       res.status(201).json(policy);
     }),
   );
@@ -569,9 +579,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const nowIso = new Date().toISOString();
 
+      // Encrypt the API key with AES-256-GCM before storing in SQLite.
+      // decryptByokKey() handles backward-compat with any previously
+      // stored plaintext keys.
+      const encryptedKey = encryptByokKey(apiKey);
+
       const updateData = {
         llmProvider: "gemini" as const,
-        geminiApiKeyEncrypted: apiKey,
+        geminiApiKeyEncrypted: encryptedKey,
         geminiApiKeyLast4: validation.last4,
         geminiApiKeyValidatedAt: nowIso,
       };
@@ -1533,6 +1548,10 @@ app.get("/api/recommendations", requireAuth, asyncHandler(async (req: any, res: 
       }
     });
   }));
+
+  // Register error handlers AFTER all routes so they catch errors thrown by route handlers
+  app.use(notFoundHandler);
+  app.use(errorHandler);
 
   const httpServer = createServer(app);
   return httpServer;

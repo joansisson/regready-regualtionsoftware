@@ -72,7 +72,10 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction) 
 // Content Security Policy
 export const contentSecurityPolicy = (req: Request, res: Response, next: NextFunction) => {
   const isProd = process.env.NODE_ENV === "production";
-  const isElectronDesktop = process.env.ELECTRON_DESKTOP === "true";
+  const isElectronDesktop =
+    process.env.ELECTRON_DESKTOP === "true" ||
+    // robust: works regardless of env vars
+    typeof process.versions?.electron === "string";
 
   // Electron renderer bundles in this repo rely on some inline styles.
   // Allow unsafe-inline for desktop runs to prevent blank/blocked UI.
@@ -145,25 +148,34 @@ export const requestSizeLimit = (maxSize: number = 10 * 1024 * 1024) => { // 10M
 };
 
 // Sensitive data detection
+// IMPORTANT: Only redact data on responses that are NOT part of the
+// user's own settings/API-key management flow. The user intentionally
+// saves and retrieves their own BYOK key metadata.
+// Also skip /api/auth/login since it transmits user credentials.
 export const sensitiveDataProtection = (req: Request, res: Response, next: NextFunction) => {
+  // Skip redaction entirely for endpoints where the user manages their own API keys
+  // or authenticates. On these endpoints, the user intentionally sends/receives credentials.
+  const isApiKeyEndpoint =
+    req.path.startsWith('/api/user/settings/api-key') ||
+    req.path.startsWith('/api/auth/login');
+
   const originalSend = res.send;
 
   res.send = function(data: any) {
-    // Check for sensitive data patterns in response
     if (typeof data === 'string') {
-      // Remove potential credit card numbers
+      // Always redact CC and SSN regardless of endpoint
       data = data.replace(/\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b/g, '[REDACTED-CC]');
-
-      // Remove potential SSNs
       data = data.replace(/\b\d{3}-\d{2}-\d{4}\b/g, '[REDACTED-SSN]');
 
-      // Remove potential API keys
-      data = data.replace(/\b[a-zA-Z0-9]{32,}\b/g, (match: string) => {
-        if (match.toLowerCase().includes('key') || match.toLowerCase().includes('token')) {
-          return '[REDACTED-KEY]';
-        }
-        return match;
-      });
+      // On non-API-key endpoints, redact patterns that look like well-known API keys.
+      // On API key endpoints, the user is intentionally managing their own keys.
+      if (!isApiKeyEndpoint) {
+        // Redact well-known API key patterns (Gemini, OpenAI, GitHub, etc.)
+        data = data.replace(
+          /\b(?:AIza[0-9A-Za-z_-]{20,}|sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9_]{20,}|gho_[A-Za-z0-9_]{20,}|ghu_[A-Za-z0-9_]{20,})\b/g,
+          '[REDACTED-API-KEY]'
+        );
+      }
     }
 
     return originalSend.call(this, data);

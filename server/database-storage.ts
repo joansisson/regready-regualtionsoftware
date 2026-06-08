@@ -38,6 +38,7 @@ import { IStorage } from "./storage";
 
 export class DatabaseStorage implements IStorage {
   private readonly JWT_SECRET: string;
+  private initialized = false;
 
   constructor() {
     const secret = process.env.JWT_SECRET;
@@ -45,15 +46,26 @@ export class DatabaseStorage implements IStorage {
       throw new Error("JWT_SECRET is not set. Ensure ensureAppSecrets() ran before DatabaseStorage initialization.");
     }
     this.JWT_SECRET = secret;
-    this.initializeDefaultData();
+    // NOTE: initialize() must be called separately before using any data methods.
+    // This avoids the "fire-and-forget async in constructor" anti-pattern.
   }
 
-  private async initializeDefaultData() {
+  /**
+   * Initialize default seed data (frameworks, compliance checks, vendors, etc.).
+   * Must be called once after construction and before using the storage for queries.
+   * Safe to call multiple times — subsequent calls are no-ops.
+   */
+  async initialize(): Promise<void> {
+    if (this.initialized) return;
+    this.initialized = true;
+    await this.initializeDefaultData();
+  }
+
+  private async initializeDefaultData(): Promise<void> {
     try {
       const existingFrameworks = await db.select().from(complianceFrameworks);
       
       if (existingFrameworks.length === 0) {
-        // Initialize default compliance frameworks
         const defaultFrameworks = [
           {
             name: "gdpr",
@@ -80,9 +92,6 @@ export class DatabaseStorage implements IStorage {
 
         await db.insert(complianceFrameworks).values(defaultFrameworks);
 
-        // Initialize default compliance controls (Requirement Layer)
-        // These are intentionally minimal seed controls so the Scan layer can compare
-        // local evidence (policies) against framework requirements.
         const gdprFramework = await db
           .select()
           .from(complianceFrameworks)
@@ -102,7 +111,6 @@ export class DatabaseStorage implements IStorage {
 
         if (gdprId && soc2Id && euAiActId) {
           const defaultComplianceChecks = [
-            // GDPR
             {
               frameworkId: gdprId,
               checkName: "GDPR Art. 30 — Records of Processing",
@@ -119,8 +127,6 @@ export class DatabaseStorage implements IStorage {
               status: "pending",
               evidence: "",
             },
-
-            // SOC 2
             {
               frameworkId: soc2Id,
               checkName: "SOC 2 — Access Control & Monitoring",
@@ -137,8 +143,6 @@ export class DatabaseStorage implements IStorage {
               status: "pending",
               evidence: "",
             },
-
-            // EU AI Act
             {
               frameworkId: euAiActId,
               checkName: "EU AI Act — AI System Documentation",
@@ -152,7 +156,6 @@ export class DatabaseStorage implements IStorage {
           await db.insert(complianceChecks).values(defaultComplianceChecks);
         }
         
-        // Initialize default vendors
         const defaultVendors = [
           {
             name: "OpenAI",
@@ -185,37 +188,6 @@ export class DatabaseStorage implements IStorage {
 
         await db.insert(vendors).values(defaultVendors);
 
-        // Initialize sample policies
-        const defaultPolicies = [
-          {
-            title: "Privacy Policy",
-            description: "Comprehensive privacy policy covering data collection, usage, and user rights",
-            status: "approved",
-            version: "2.1",
-            content: "This privacy policy outlines how we collect, use, and protect your personal data...",
-            category: "privacy",
-            framework: "gdpr",
-            approvedBy: "Legal Team",
-            createdBy: "System",
-            nextReview: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString()
-          },
-          {
-            title: "Information Security Policy",
-            description: "Guidelines for maintaining information security across the organization",
-            status: "under-review",
-            version: "1.0",
-            content: "This policy establishes the framework for information security management...",
-            category: "security",
-            framework: "soc2",
-            approvedBy: null,
-            createdBy: "System",
-            nextReview: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString()
-          }
-        ];
-
-        // Skip policies initialization for now to avoid schema conflicts
-
-        // Initialize sample risk assessments
         const defaultRiskAssessments = [
           {
             title: "Data Breach Risk Assessment",
@@ -312,7 +284,6 @@ export class DatabaseStorage implements IStorage {
       content: policy.content || null,
       version: policy.version || "1.0",
       status: policy.status || "draft",
-      // Drizzle typing for JSON columns may surface as `Json[]`; force to the schema's string[] contract.
       frameworks: (Array.isArray(policy.frameworks) ? policy.frameworks : []) as unknown as string[],
       createdBy: policy.createdBy,
       organizationId: policy.organizationId ?? 1,
@@ -360,7 +331,6 @@ export class DatabaseStorage implements IStorage {
     return true;
   }
 
-  // Compliance framework operations
   async getComplianceFrameworks(): Promise<ComplianceFramework[]> {
     return db.select().from(complianceFrameworks);
   }
@@ -384,7 +354,6 @@ export class DatabaseStorage implements IStorage {
     return updatedFramework;
   }
 
-  // Compliance check operations
   async getComplianceChecks(frameworkId?: number): Promise<ComplianceCheck[]> {
     if (frameworkId) {
       return db.select().from(complianceChecks).where(eq(complianceChecks.frameworkId, frameworkId));
@@ -406,7 +375,6 @@ export class DatabaseStorage implements IStorage {
     return updatedCheck;
   }
 
-  // Vendor operations
   async getVendors(): Promise<Vendor[]> {
     return db.select().from(vendors);
   }
@@ -435,7 +403,6 @@ export class DatabaseStorage implements IStorage {
     return true;
   }
 
-  // Risk assessment operations (tenant-scoped by organizationId)
   async getRiskAssessments(organizationId?: number): Promise<RiskAssessment[]> {
     const whereClause = organizationId ? eq(riskAssessments.organizationId, organizationId) : undefined;
     return db.select().from(riskAssessments).where(whereClause);
@@ -473,7 +440,6 @@ export class DatabaseStorage implements IStorage {
     return updatedAssessment;
   }
 
-  // Audit report operations (tenant-scoped by organizationId)
   async getAuditReports(organizationId?: number): Promise<AuditReport[]> {
     const whereClause = organizationId ? eq(auditReports.organizationId, organizationId) : undefined;
     return db.select().from(auditReports).where(whereClause);
@@ -495,7 +461,6 @@ export class DatabaseStorage implements IStorage {
       framework: report.framework || null,
       status: report.status || "draft",
       summary: report.summary || null,
-      // ensure types align with DB expectations (string[]). Cast as needed.
       findings: (Array.isArray(report.findings) ? report.findings : []) as unknown as string[],
       recommendations: (Array.isArray(report.recommendations) ? report.recommendations : []) as unknown as string[],
       generatedBy: report.generatedBy,
@@ -507,7 +472,6 @@ export class DatabaseStorage implements IStorage {
     return newReport;
   }
 
-  // Document version operations
   async getDocumentVersions(policyId: number): Promise<DocumentVersion[]> {
     return db.select().from(documentVersions).where(eq(documentVersions.policyId, policyId));
   }
@@ -517,11 +481,9 @@ export class DatabaseStorage implements IStorage {
     return newVersion;
   }
 
-  // Trust Center / Verified Link operations (Phase 1)
   async createVerifiedLink(link: InsertVerifiedLink): Promise<VerifiedLink> {
     const linkData = {
       ...link,
-      // Drizzle typing for JSON columns may surface as `Json[]`; force to schema's string[] contract.
       badges: (Array.isArray(link.badges) ? link.badges : []) as unknown as string[],
       documents: (Array.isArray(link.documents) ? link.documents : []) as unknown as Array<{
         title: string;
@@ -540,7 +502,6 @@ export class DatabaseStorage implements IStorage {
     return found;
   }
 
-  // Activity / audit logging
   async createActivityLog(log: InsertActivityLog): Promise<ActivityLog> {
     const logData = {
       userId: log.userId,
@@ -555,7 +516,6 @@ export class DatabaseStorage implements IStorage {
     return created;
   }
 
-  // Dashboard data
   async getDashboardMetrics(): Promise<{
     complianceOverview: { framework: string; percentage: number; status: string }[];
     recentActivities: { title: string; timestamp: string; type: string }[];

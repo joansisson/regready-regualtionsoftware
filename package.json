@@ -12,6 +12,9 @@
     "start": "node dist/index.js",
     "package": "npm run build && electron-builder --win --config.win.target=nsis",
     "electron:build": "npm run build && electron-builder --x64",
+    "test": "vitest run",
+    "test:watch": "vitest watch",
+    "test:coverage": "vitest run --coverage",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio"
   },
@@ -25,6 +28,7 @@
       "dist/**/*",
       "dist/preload.cjs",
       "dist/preload.js",
+      "dist/public/**/*",
       "package.json",
       "preload.cjs",
       "migrations/**/*",
@@ -118,6 +122,7 @@
     "@types/node": "^20.19.0",
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.1",
+    "@types/supertest": "^7.2.0",
     "@vitejs/plugin-react": "^4.3.2",
     "autoprefixer": "^10.5.0",
     "concurrently": "^9.1.2",
@@ -126,9 +131,11 @@
     "electron-builder": "^26.8.1",
     "esbuild": "^0.25.12",
     "postcss": "^8.5.15",
+    "supertest": "^7.2.2",
     "tailwindcss": "^4.3.0",
     "tsx": "^4.19.1",
     "typescript": "^5.6.3",
-    "vite": "^7.3.3"
+    "vite": "^7.3.3",
+    "vitest": "^4.1.8"
   }
 }

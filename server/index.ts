@@ -5,6 +5,7 @@ import compression from "compression";
 import path from "path";
 import fs from "fs";
 import os from "os";
+import { fileURLToPath } from "url";
 import { ensureAppSecrets } from "./services/appSecrets";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
 import { apiRateLimit, authRateLimit } from "./middleware/rateLimit";
@@ -23,8 +24,13 @@ const app = express();
 const APP_NAME = "RegReady Local Pro";
 const isProd = process.env.NODE_ENV === "production" || !fs.existsSync(path.join(process.cwd(), "src"));
 
+const appRootDefault = (() => {
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  return path.resolve(__dirname, "..");
+})();
+
 // Safeguard against absolute directory shifts inside the running system context
-const baseDir = process.env.REGREADY_BASE_DIR ?? process.cwd();
+const baseDir = process.env.REGREADY_BASE_DIR ?? (isProd ? appRootDefault : process.cwd());
 
 function log(message: string) {
   const formattedTime = new Date().toLocaleTimeString();
@@ -117,7 +123,13 @@ function scheduleGeneratedPdfCleanup() {
   const retentionHours = parseInt(process.env.PDF_RETENTION_HOURS || "24", 10);
   const cutoffMs = Date.now() - retentionHours * 60 * 60 * 1000;
 
-  const dir = path.join(baseDir, "generated-pdfs");
+  // Use the same path resolution as the PDF generator service, so cleanup
+  // targets the correct directory in both dev and packaged modes.
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+  const isPackaged = moduleDir.includes('app.asar') || moduleDir.includes('win-unpacked');
+  const dir = isPackaged
+    ? path.join(process.env.APPDATA || '', 'RegReady Local Pro', 'generated-pdfs')
+    : path.join(process.cwd(), 'generated-pdfs');
 
   const cleanupOnce = () => {
     try {
@@ -185,13 +197,44 @@ function scheduleGeneratedPdfCleanup() {
     const server = await registerRoutes(app);
 
     // --- BROAD SEARCH TARGET MAP FOR STATIC PRODUCTION FRONTEND UI ---
-    const staticCandidates = [
-      path.join(baseDir, "dist", "public"),
-      path.join(baseDir, "public"),
-      // express.static cannot serve from inside app.asar, so packaged Electron UI must be unpacked
-      path.join(baseDir, "app.asar.unpacked", "dist", "public"),
-      path.join(baseDir, "app.asar.unpacked", "public"),
-    ];
+    // In packaged Electron, REGREADY_BASE_DIR might be set inconsistently.
+    // To be bulletproof, infer the unpacked app root from the current server module path.
+    const serverModulePath = fileURLToPath(import.meta.url);
+    // IMPORTANT: fileURLToPath(import.meta.url) returns POSIX-style forward slashes
+    // on all platforms (including Windows). Never use path.sep for matching against it.
+    const inferredUnpackedAppRoot = (() => {
+      const asarSegment = "/app.asar/";
+      const unpackedSegment = "/app.asar.unpacked/";
+      if (!serverModulePath.includes(asarSegment)) return null;
+
+      const unpackedIndexPath = serverModulePath.replace(asarSegment, unpackedSegment);
+      // serverModulePath: .../app.asar.unpacked/dist/index.js -> app root is one level above /dist
+      return path.resolve(path.dirname(unpackedIndexPath), "..");
+    })();
+
+    const staticCandidates = (() => {
+      const unpackedCandidates: string[] = [];
+      const asarCandidates: string[] = [];
+
+      // Prefer unpacked paths so index.html and /assets/*.css+js come from the same location.
+      // This avoids serving index.html from app.asar while assets are only present in app.asar.unpacked.
+      unpackedCandidates.push(
+        path.join(baseDir, "app.asar.unpacked", "dist", "public"),
+        path.join(baseDir, "app.asar.unpacked", "public"),
+      );
+
+      if (inferredUnpackedAppRoot) {
+        unpackedCandidates.push(
+          path.join(inferredUnpackedAppRoot, "dist", "public"),
+          path.join(inferredUnpackedAppRoot, "public"),
+        );
+      }
+
+      // Fallbacks (less preferred)
+      asarCandidates.push(path.join(baseDir, "dist", "public"), path.join(baseDir, "public"));
+
+      return [...unpackedCandidates, ...asarCandidates];
+    })();
 
     // Safe fallback to check if index layout exists inside the bundle locations
     const staticDir = staticCandidates.find((dir) => fs.existsSync(path.join(dir, "index.html"))) || staticCandidates[0];
@@ -207,9 +250,26 @@ function scheduleGeneratedPdfCleanup() {
 
     if (canServeStatic) {
       log(`Serving static client interface from: ${staticDir}`);
-      app.use(express.static(staticDir));
-      app.get(/^(?!\/api).*/, (_req, res) => {
-        res.sendFile(indexHtmlPath);
+      
+      // PRODUCTION FIX: Serve assets with proper caching headers for asset files
+      app.use(express.static(staticDir, {
+        maxAge: isProd ? "1y" : "0",
+        etag: false,
+      }));
+
+      // SPA fallback: only serve index.html for HTML navigation requests.
+      // This prevents accidental HTML responses for CSS/JS/image fetches when assets are missing.
+      app.get("*", (req: Request, res: Response, next: NextFunction) => {
+        if (req.path.startsWith("/api")) return next();
+        if (req.method !== "GET") return next();
+
+        // If the request looks like a static asset (has an extension), don't hijack it.
+        if (path.extname(req.path)) return next();
+
+        const acceptsHtml = req.accepts("html");
+        if (acceptsHtml !== "html") return next();
+
+        return res.sendFile(indexHtmlPath);
       });
     } else {
       // If we are strictly in production, do not try to load Vite configuration modules
@@ -231,6 +291,96 @@ function scheduleGeneratedPdfCleanup() {
       log(`🚀 Local Pro Engine active at http://127.0.0.1:${port}`);
     });
 
+    // =================================================================
+    // GRACEFUL SHUTDOWN
+    // =================================================================
+    // When the user closes the app (SIGTERM from Electron, Ctrl+C from
+    // terminal, or Windows system shutdown), we need to:
+    //
+    // 1. Stop accepting new HTTP connections
+    // 2. Close the SQLite database safely (flush WAL, release locks)
+    // 3. Clean up any in-progress operations
+    //
+    // Without this, the SQLite WAL file may not be checkpointed back to
+    // the main database file, potentially causing data loss on next start.
+    //
+    let shuttingDown = false;
+
+    function gracefulShutdown(signal: string) {
+      if (shuttingDown) return; // prevent double-invocation
+      shuttingDown = true;
+
+      const startMs = Date.now();
+      log(`Received ${signal}. Starting graceful shutdown...`);
+
+      // Force a WAL checkpoint to flush pending writes
+      try {
+        sqlite.pragma('wal_checkpoint(TRUNCATE)');
+        log('WAL checkpoint completed.');
+      } catch (e) {
+        console.warn(`[${APP_NAME}] WAL checkpoint failed during shutdown:`, e);
+      }
+
+      // Close the HTTP server (stops accepting new connections)
+      // but allows existing in-flight requests to complete.
+      server.close((err) => {
+        if (err) {
+          console.error(`[${APP_NAME}] HTTP server close error:`, err);
+        } else {
+          log('HTTP server closed.');
+        }
+
+        // Close the SQLite database connection
+        try {
+          sqlite.close();
+          log('SQLite database connection closed.');
+        } catch (e) {
+          console.warn(`[${APP_NAME}] SQLite close error:`, e);
+        }
+
+        const elapsed = Date.now() - startMs;
+        log(`Graceful shutdown complete in ${elapsed}ms.`);
+
+        // In Electron, the main process manages process exit.
+        // When running standalone, signal the process to exit.
+        if (process.env.ELECTRON_DESKTOP !== 'true') {
+          process.exit(0);
+        }
+      });
+
+      // Safety net: force exit after 10 seconds regardless
+      setTimeout(() => {
+        console.warn(`[${APP_NAME}] Forced shutdown after timeout (10s).`);
+        try { sqlite.close(); } catch { /* ignore */ }
+        if (process.env.ELECTRON_DESKTOP !== 'true') {
+          process.exit(1);
+        }
+      }, 10_000).unref();
+    }
+
+    // Register signal handlers for all supported platforms
+    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+    // Windows-specific: handle console close events and app exit
+    process.on('exit', (code) => {
+      // 'exit' is called after the event loop stops, so we can only do
+      // synchronous cleanup here. The real work happens in the signal handlers.
+      try { sqlite.close(); } catch { /* ignore */ }
+      log(`Process exiting with code ${code}.`);
+    });
+
+    // Unhandled rejections should at least be logged, even in production
+    process.on('unhandledRejection', (reason) => {
+      console.error(`[${APP_NAME}] Unhandled rejection:`, reason);
+    });
+
+    process.on('uncaughtException', (err) => {
+      console.error(`[${APP_NAME}] Uncaught exception:`, err);
+      // Attempt a quick safety close of the DB before crashing
+      try { sqlite.close(); } catch { /* ignore */ }
+      // Let the process crash naturally (not calling process.exit)
+    });
   } catch (error) {
     const crashLogPath = path.join(os.tmpdir(), `regready-startup-crash-${Date.now()}.log`);
     const message = error instanceof Error ? error.stack || error.message : String(error);

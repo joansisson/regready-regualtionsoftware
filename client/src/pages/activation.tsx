@@ -17,6 +17,7 @@ import {
   setStoredLLMProvider,
   type LLMProvider,
 } from "@/lib/auth";
+import styles from "./activation.module.css";
 
 type ActivationState = "idle" | "saving" | "error";
 type ActivationMode = "page" | "form";
@@ -114,11 +115,12 @@ export default function Activation({ mode = "page" }: ActivationProps) {
   };
 
   const form = (
-    <form className="w-full max-w-[340px]" onSubmit={handleSubmit}>
+    <form className={`${styles.form} w-full max-w-[340px]`} onSubmit={handleSubmit}>
       <Card
         className={[
           "border-orange-100 bg-white text-slate-900 shadow-xl shadow-orange-900/5",
           mode === "form" ? "activation-form-delay-in" : "",
+          styles.card,
         ].join(" ")}
       >
         <CardHeader className="space-y-1 px-6 pt-6">
@@ -259,14 +261,14 @@ export default function Activation({ mode = "page" }: ActivationProps) {
 
   if (mode === "form") {
     return (
-      <div className="h-full w-full bg-transparent text-slate-900 selection:bg-orange-100">
+      <div className={`${styles.pageRoot} h-full w-full bg-transparent text-slate-900 selection:bg-orange-100`}>
         <main className="flex h-full items-center justify-center p-4">{form}</main>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#FCF7EF] text-slate-900 selection:bg-orange-100">
+    <div className={`${styles.pageRoot} min-h-screen bg-[#FCF7EF] text-slate-900 selection:bg-orange-100`}>
       <main className="grid min-h-screen lg:grid-cols-[1fr_400px]">
         <section className="grid min-h-screen grid-rows-2 border-r border-orange-100/50">
           <div className="flex items-center justify-center bg-white/40 p-8">

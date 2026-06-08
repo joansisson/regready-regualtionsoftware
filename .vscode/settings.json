@@ -3,5 +3,6 @@
         "origin",
         "upstream",
         "https://github.com/joansisson/Project-Portfolio"
-    ]
+    ],
+    "sixth.telegram.enabled": false
 }

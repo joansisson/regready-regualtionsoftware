@@ -98,4 +98,30 @@ export interface IStorage {
   }>;
 }
 
-export const storage = new DatabaseStorage();
+// Async factory: the storage constructor is synchronous but seed data
+// initialization is deferred. Call createStorage() before using any routes.
+let _storage: DatabaseStorage | null = null;
+
+export async function createStorage(): Promise<DatabaseStorage> {
+  if (!_storage) {
+    _storage = new DatabaseStorage();
+    await _storage.initialize();
+  }
+  return _storage;
+}
+
+// Backward-compat for imports that reference `storage` directly.
+// This will be populated lazily by the first call to createStorage().
+// Prefer createStorage() for new code to guarantee seed data is ready.
+export const storage: DatabaseStorage = new Proxy({} as DatabaseStorage, {
+  get(_target, prop: keyof DatabaseStorage) {
+    if (!_storage) {
+      throw new Error(
+        'DatabaseStorage not initialized. Call await createStorage() before accessing storage.' +
+        ' This happens when a module imports `storage` at top-level before server boot completes.'
+      );
+    }
+    const value = (_storage as any)[prop];
+    return typeof value === 'function' ? value.bind(_storage) : value;
+  },
+});

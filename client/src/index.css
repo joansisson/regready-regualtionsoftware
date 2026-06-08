@@ -1,6 +1,6 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@tailwind base; /* stylelint-disable-line at-rule-no-unknown */
+@tailwind components; /* stylelint-disable-line at-rule-no-unknown */
+@tailwind utilities; /* stylelint-disable-line at-rule-no-unknown */
 
 html, body, #root {
   margin: 0;

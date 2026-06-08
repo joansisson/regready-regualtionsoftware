@@ -1,0 +1,70 @@
+/* Minimal scoped fallback styles to prevent unstyled/overlapping UI
+   when global Tailwind/CSS is delayed or missing in packaged builds. */
+
+.pageRoot {
+  /* Ensure the page uses a sane default font and background when Tailwind isn't applied */
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  box-sizing: border-box;
+  min-height: 100vh;
+  background-color: #FCF7EF;
+  color: #0f172a; /* slate-900 fallback */
+}
+
+/* Card fallback - provides padding, border and subtle shadow */
+.card {
+  border-radius: 12px;
+  border: 1px solid rgba(249, 115, 22, 0.08); /* border-orange-100 */
+  background: #ffffff;
+  box-shadow: 0 6px 18px rgba(14, 42, 58, 0.04);
+  overflow: visible;
+}
+
+/* Ensures the form container doesn't collapse or overlap */
+.form {
+  width: 100%;
+  max-width: 340px;
+  box-sizing: border-box;
+}
+
+/* Make sure inputs take full width when Tailwind not present */
+.card input,
+.card textarea,
+.card select,
+.card button {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* Basic input appearance */
+.card input {
+  height: 40px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(249, 115, 22, 0.08);
+  background: rgba(252, 247, 239, 0.3);
+  font-size: 14px;
+  color: inherit;
+}
+
+/* Ensure the action button is visually distinct */
+.card button[type="submit"] {
+  height: 48px;
+  border-radius: 12px;
+  background: #065f46; /* emerald-700 fallback */
+  color: #fff;
+  font-weight: 700;
+  border: none;
+  cursor: pointer;
+}
+
+/* Small responsive fix: stack grid columns on narrow screens */
+@media (max-width: 480px) {
+  .form {
+    padding: 0 12px;
+  }
+  .card input {
+    height: 44px;
+  }
+}   

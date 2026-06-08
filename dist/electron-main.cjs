@@ -118,6 +118,7 @@ async function createWindow() {
       appendPackagedDebugLine(`import(dist/index.js) completed`);
     } catch (err) {
       appendPackagedDebugLine(`import(dist/index.js) FAILED: ${String(err?.stack || err)}`);
+      throw err;
     }
   } else {
     const portableExecDir = process.env.PORTABLE_EXECUTABLE_DIR;
@@ -145,30 +146,73 @@ async function createWindow() {
     width: 1200,
     height: 800,
     backgroundColor: "#0b0f14",
-    autoHideMenuBar: true,
+    autoHideMenuBar: false,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: false,
-      preload: app.isPackaged ? path.join(process.resourcesPath, "preload.cjs") : path.join(__dirname, "preload.cjs")
+      preload: app.isPackaged ? path.join(process.resourcesPath, "app.asar.unpacked", "preload.cjs") : path.join(__dirname, "preload.cjs")
     }
   });
   mainWindow.webContents.on("console-message", (_event, level, message, line, sourceId) => {
     console.log(`[renderer console] ${level} ${sourceId}:${line} ${message}`);
+    appendPackagedDebugLine(`[renderer console] ${level} ${sourceId}:${line} ${message}`);
   });
   mainWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
-    console.error(`[renderer load failed] code=${errorCode} desc=${errorDescription} url=${String(validatedURL)}`);
+    const msg = `[renderer load failed] code=${errorCode} desc=${errorDescription} url=${String(validatedURL)}`;
+    console.error(msg);
+    appendPackagedDebugLine(msg);
   });
   mainWindow.webContents.on("render-process-gone", (_event, details) => {
-    console.error(`[renderer gone] ${JSON.stringify(details)}`);
+    const msg = `[renderer gone] ${JSON.stringify(details)}`;
+    console.error(msg);
+    appendPackagedDebugLine(msg);
   });
+  mainWindow.webContents.on("before-input-event", (event, input) => {
+    try {
+      if (input.control && input.shift && input.key && input.key.toLowerCase() === "i") {
+        mainWindow.webContents.toggleDevTools();
+        event.preventDefault();
+      }
+    } catch {
+    }
+  });
+  try {
+    const sess = mainWindow.webContents.session;
+    sess.webRequest.onCompleted({ urls: ["*://*/*"] }, (details) => {
+      if (details.statusCode >= 400) {
+        appendPackagedDebugLine(`resource failed: ${details.statusCode} ${details.method} ${details.url}`);
+      }
+    });
+  } catch (err) {
+    appendPackagedDebugLine(`webRequest monitoring failed: ${String(err?.stack || err)}`);
+  }
+  const enableDevtoolsByEnv = String(process.env.REGREADY_OPEN_DEVTOOLS || "").toLowerCase() === "true";
+  const enableDevtoolsByFile = (() => {
+    try {
+      const marker = path.join(app.getPath("appData") || process.env.APPDATA || "", "RegReady Local Pro", "enable-devtools");
+      return fs.existsSync(marker);
+    } catch {
+      return false;
+    }
+  })();
+  if (enableDevtoolsByEnv || enableDevtoolsByFile) {
+    try {
+      mainWindow.webContents.openDevTools({ mode: "detach" });
+      appendPackagedDebugLine("DevTools opened by debug marker");
+    } catch (err) {
+      appendPackagedDebugLine(`Failed to open DevTools: ${String(err?.stack || err)}`);
+    }
+  }
   try {
     await waitForServerReady(15e3);
     mainWindow.loadURL(SERVER_URL);
   } catch (err) {
     console.error(`[electron] Server failed to start: ${String(err?.message || err)}`);
     if (app.isPackaged) {
-      mainWindow.loadFile(path.join(process.resourcesPath, "app.asar", "dist", "public", "index.html"));
+      const fallbackPath = `file://${path.join(process.resourcesPath, "app.asar.unpacked", "dist", "public", "index.html")}`;
+      appendPackagedDebugLine(`[electron] using fallback file URL: ${fallbackPath}`);
+      mainWindow.loadURL(fallbackPath);
     } else {
       mainWindow.loadURL(SERVER_URL);
     }
